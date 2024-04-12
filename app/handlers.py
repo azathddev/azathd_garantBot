@@ -1,18 +1,25 @@
 import random
+import time
+
 from aiogram import Router, types, F
 from aiogram.filters.command import Command
 from aiogram.fsm.context import FSMContext
 from aiogram.fsm.state import StatesGroup, State
 from aiogram.types import CallbackQuery
 
+from app.database import Database
 import app.keyboard as kb
 from config import *
+
+from icecream import ic
 
 
 class Waiting(StatesGroup):
     password = State()
     choice = State()
 
+
+db = Database('database.db')
 
 rooms = {}
 router = Router()
@@ -38,21 +45,21 @@ async def cmd_join(clbck: CallbackQuery, state: FSMContext):
 @router.callback_query(F.data == "buyer")
 @router.callback_query(F.data == "seller")
 async def create_handler(clbck: CallbackQuery):
-    user_id = clbck.message.from_user.id
-    chars = 'abcdefghijklnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ1234567890'
+    user_id = clbck.from_user.id
+    chars = CHARS_LIST
     password = ''
     while True:
         for i in range(10):
             password += random.choice(chars)
         if password not in rooms:
             break
-    buyer = seller = None
-    if F.data == "buyer":
-        buyer = user_id
-    elif F.data == "seller":
+    buyer, seller = None, None
+    if clbck.data == "seller":
         seller = user_id
-    rooms[password] = {"buyer": buyer,
-                       "seller": seller}
+    elif clbck.data == "buyer":
+        buyer = user_id
+    ic(clbck.data, user_id, password, buyer, seller)
+    db.add_room(password, buyer, seller)
     answer = ROOM_CREATED.replace("%id%", password)
     await clbck.message.edit_text(answer)
     await clbck.answer("")
@@ -62,19 +69,22 @@ async def create_handler(clbck: CallbackQuery):
 async def join_password_handler(message: types.Message):
     user_id = message.from_user.id
     text = message.text
-    if rooms.get(text):
-        if rooms[text]["buyer"] and rooms[text]["seller"]:
+    ic(db.get_ids())
+    if text in db.get_ids():
+        room = db.get_room(text)
+        ic(room)
+        if room[0] and room[1]:
             await message.answer(ROOM_IS_FULL)
             return True
-        if rooms[text]["buyer"]:
-            rooms[text]["seller"] = user_id
+        if room[0]:
+            room[1] = user_id
             answer = JOIN_SELLER.replace("%id%", text)
             await message.answer(answer)
             # рума готова
-        elif rooms[text]["seller"]:
-            rooms[text]["buyer"] = user_id
+        elif room[1]:
+            room[0] = user_id
             answer = JOIN_SELLER.replace("%id%", str(text))
             await message.answer(answer)
-            # рума готова
+        db.update_room(text, room[0], room[1])
     else:
         await message.answer(ROOM_IS_NOT_FOUND)
